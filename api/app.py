@@ -1,42 +1,46 @@
 from flask import Flask, request, jsonify
 import sqlite3
-import subprocess
 import hashlib
-import os
-import ast
+import subprocess
 
 app = Flask(__name__)
-app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "change-me")
 
-# ================= LOGIN =================
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+
 @app.route("/login", methods=["POST"])
 def login():
-    data = request.get_json()
-    username = data.get("username")
-    password = data.get("password")
+    username = request.json.get("username")
+    password = request.json.get("password")
 
-    hashed_password = hashlib.sha256(password.encode()).hexdigest()
+    hashed_password = hash_password(password)
 
     conn = sqlite3.connect("users.db")
     cursor = conn.cursor()
 
+    # ✅ Requête paramétrée (anti SQL injection)
     cursor.execute(
         "SELECT * FROM users WHERE username=? AND password=?",
         (username, hashed_password)
     )
 
-    if cursor.fetchone():
-        return jsonify({"status": "success", "user": username})
+    user = cursor.fetchone()
+    conn.close()
 
-    return jsonify({"status": "error"}), 401
+    if user:
+        return jsonify({"message": "Login successful"})
+    else:
+        return jsonify({"message": "Invalid credentials"}), 401
 
-# ================= PING =================
-@app.route("/ping", methods=["POST"])
+
+@app.route("/ping", methods=["GET"])
 def ping():
-    host = request.json.get("host")
+    host = request.args.get("host")
 
-    if not host or ";" in host or "&" in host:
-        return {"error": "Invalid host"}, 400
+    # ✅ Suppression de la commande dangereuse
+    if not host.isalnum():
+        return "Invalid host", 400
 
     result = subprocess.run(
         ["ping", "-c", "1", host],
@@ -44,31 +48,8 @@ def ping():
         text=True
     )
 
-    return {"output": result.stdout}
+    return result.stdout
 
-# ================= COMPUTE =================
-@app.route("/compute", methods=["POST"])
-def compute():
-    expression = request.json.get("expression")
-
-    try:
-        node = ast.parse(expression, mode="eval")
-        result = eval(compile(node, "", "eval"), {"__builtins__": {}})
-        return {"result": result}
-    except:
-        return {"error": "Invalid expression"}, 400
-
-# ================= HASH =================
-@app.route("/hash", methods=["POST"])
-def hash_password():
-    pwd = request.json.get("password")
-    hashed = hashlib.sha256(pwd.encode()).hexdigest()
-    return {"sha256": hashed}
-
-# ================= HELLO =================
-@app.route("/hello", methods=["GET"])
-def hello():
-    return {"message": "Secure DevSecOps API"}
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
